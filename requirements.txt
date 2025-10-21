@@ -1,0 +1,26 @@
+# Core LLM and OpenAI client
+openai>=1.35.10
+
+# PDF parsing
+PyPDF2>=3.0.1
+
+# Word (DOCX) generation
+python-docx>=1.1.0
+
+# PDF generation
+reportlab>=4.2.2
+
+# Image and logo handling
+Pillow>=10.3.0
+
+# Timezone and date handling
+tzdata>=2024.1
+
+# Environment variable management
+python-dotenv>=1.0.1
+python-multipart>=0.0.6
+
+# Optional — if you plan to host a minimal REST API for the demo (Render-ready)
+fastapi>=0.115.0
+uvicorn>=0.30.6
+
