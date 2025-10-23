@@ -57,7 +57,7 @@ LOGO_PATH = os.path.join(BASE_DIR, "Transformate Logo.png")  # exact path you us
 DEMO_FILES = [
     "FINMA rs 2011 02 20200101 - Capital buffer and capital planning - banks.pdf",
     "FINMA rs 2023 01 20221207 - Operational risks and resilience - banks.pdf",
-    "FINMA rs 2018 02 - Duty to report securities transactions\".pdf",  # note the trailing quote in your name
+    "FINMA rs 2018 02 - Duty to report securities transactions.pdf",
 ]
 
 # ---------- Helpers ----------
