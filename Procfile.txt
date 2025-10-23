@@ -1,1 +1,2 @@
 web: uvicorn main:app --host 0.0.0.0 --port 10000
+web: uvicorn tis_dual_mode_summariser:app --host 0.0.0.0 --port 10000
