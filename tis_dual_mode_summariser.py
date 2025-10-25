@@ -109,10 +109,9 @@ def summarise_text(text: str, filename: str):
 
     return summary, prompt_tokens, completion_tokens, total_tokens, usd_cost, chf_cost
 
-
 # === Chatbase Integration ===
 def push_to_chatbase(title: str, summary_text: str):
-    """Send generated summary text to Chatbase knowledge base for live querying."""
+    """Send generated summary text to Chatbase for live querying."""
     if not CHATBASE_API_KEY:
         print("⚠️ CHATBASE_API_KEY not configured — skipping Chatbase upload.")
         return False
@@ -125,7 +124,7 @@ def push_to_chatbase(title: str, summary_text: str):
     payload = {
         "name": title,
         "type": "text",
-        "content": summary_text[:18000],  # safeguard against oversized payloads
+        "content": summary_text[:18000]  # safeguard against oversized payloads
     }
 
     try:
