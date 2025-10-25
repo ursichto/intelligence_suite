@@ -1,4 +1,8 @@
 #
+# Transformate Intelligence Suite (Dual Mode + Chatbase Integration)
+#
+
+#
 # Below is a drop-in FastAPI web service that keeps your exact PDF formatting logic and adds dual mode:
 #
 # POST /summarise_demo → runs all 3 fixed PDFs you listed (reads them from input_reports/).
@@ -11,6 +15,7 @@ import os
 import re
 import html
 import shutil
+import requests
 from typing import List, Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -22,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from PyPDF2 import PdfReader
 from openai import OpenAI
 
-# ReportLab / DOCX deps (PDF is used for demo; DOCX kept intact for parity)
+# ReportLab / DOCX deps
 from docx import Document
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -33,27 +38,27 @@ from PIL import Image as PILImage
 
 # === CONFIGURATION ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")  # <-- must be set in Render dashboard
+CHATBASE_BOT_ID = "eJ86MiNhODp3671KJoMTN"
+
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 MODEL = "gpt-4o-mini"
 
-# Pricing (as per your working script)
 USD_PER_1K_PROMPT = 0.00015
 USD_PER_1K_COMPLETION = 0.00060
 CHF_CONVERSION_RATE = 0.80
 
-# Paths (Render-friendly)
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 INPUT_FOLDER = os.path.join(BASE_DIR, "input_reports")
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "summaries")
 os.makedirs(INPUT_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-LOGO_PATH = os.path.join(BASE_DIR, "Transformate Logo.png")  # exact path you used
+LOGO_PATH = os.path.join(BASE_DIR, "Transformate Logo.png")
 
-# Fixed demo files (exact names you provided)
 DEMO_FILES = [
     "FINMA rs 2011 02 20200101 - Capital buffer and capital planning - banks.pdf",
     "FINMA rs 2023 01 20221207 - Operational risks and resilience - banks.pdf",
@@ -71,7 +76,6 @@ def extract_text_from_pdf(path: str) -> str:
         if page_text:
             text += page_text + "\n"
     return text.strip()
-
 
 def summarise_text(text: str, filename: str):
     """Generate executive summary and return summary + token/cost stats."""
@@ -104,6 +108,36 @@ def summarise_text(text: str, filename: str):
     return summary, prompt_tokens, completion_tokens, total_tokens, usd_cost, chf_cost
 
 
+# === Chatbase Integration ===
+def push_to_chatbase(title: str, summary_text: str):
+    """Send generated summary text to Chatbase knowledge base for live querying."""
+    if not CHATBASE_API_KEY:
+        print("⚠️ CHATBASE_API_KEY not configured — skipping Chatbase push.")
+        return False
+    url = "https://www.chatbase.co/api/knowledge"
+    headers = {
+        "Authorization": f"Bearer {CHATBASE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "chatbotId": CHATBASE_BOT_ID,
+        "documents": [
+            {
+                "title": title,
+                "content": summary_text[:18000]  # safeguard against oversized payloads
+            }
+        ],
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        r.raise_for_status()
+        print(f"✅ Summary '{title}' uploaded to Chatbase.")
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to upload summary '{title}' to Chatbase: {e}")
+        return False
+
+# ---------- DOCX and PDF GENERATION
 # ---------- DOCX (kept intact; not used by demo endpoints unless you want it) ----------
 
 def save_to_docx(
@@ -324,12 +358,11 @@ def save_to_pdf(
 
 # ---------- FastAPI App ----------
 
-app = FastAPI(title="Transformate Intelligence Suite (Dual Mode)", version="1.0")
+app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.1")
 
-# (Optional) CORS if you embed from Carrd or other origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten to your Carrd domain in production
+    allow_origins=["*"],  # tighten for prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -338,12 +371,11 @@ app.add_middleware(
 
 @app.get("/")
 async def health():
-    return {"status": "ok", "service": "Transformate Intelligence Suite (Dual Mode)"}
+    return {"status": "ok", "service": "Transformate Intelligence Suite + Chatbase"}
 
 
 @app.get("/files/{path:path}")
 async def get_file(path: str):
-    """Serve files from the summaries folder."""
     safe_path = os.path.normpath(path).lstrip(os.sep)
     full_path = os.path.join(OUTPUT_FOLDER, safe_path)
     if not os.path.isfile(full_path):
@@ -352,7 +384,7 @@ async def get_file(path: str):
 
 
 def _summarise_and_generate(pdf_path: str) -> dict:
-    """Internal: summarise a single PDF and write a nicely formatted PDF summary."""
+    """Summarise a single PDF, generate a summary PDF, and push to Chatbase."""
     if not pdf_path.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail=f"Only PDF files are supported: {os.path.basename(pdf_path)}")
 
@@ -363,7 +395,6 @@ def _summarise_and_generate(pdf_path: str) -> dict:
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     output_pdf = os.path.join(OUTPUT_FOLDER, f"Summary_{base_name}.pdf")
 
-    # Generate PDF (kept exactly like your working version)
     save_to_pdf(
         summary,
         output_pdf,
@@ -372,10 +403,12 @@ def _summarise_and_generate(pdf_path: str) -> dict:
         completion_tokens=ct,
         total_tokens=tt,
         usd_cost=usd,
-        chf_cost=chf
+        chf_cost=chf,
     )
 
-    # Public file URL via /files route
+    # === NEW: Push summary to Chatbase Knowledge API ===
+    push_to_chatbase(base_name, summary)
+
     public_url = f"/files/{os.path.basename(output_pdf)}"
 
     return {
@@ -383,19 +416,15 @@ def _summarise_and_generate(pdf_path: str) -> dict:
         "summary_file": public_url,
         "token_usage": {"prompt": pt, "completion": ct, "total": tt},
         "cost": {"usd": usd, "chf": chf},
-        "summary_preview": summary[:500] + ("..." if len(summary) > 500 else "")
+        "summary_preview": summary[:500] + ("..." if len(summary) > 500 else ""),
     }
 
 
 @app.post("/summarise_demo")
 async def summarise_demo():
-    """Run summaries for the 3 fixed FINMA PDFs in input_reports/."""
     missing = [f for f in DEMO_FILES if not os.path.isfile(os.path.join(INPUT_FOLDER, f))]
     if missing:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Missing demo files in input_reports/: {missing}"
-        )
+        raise HTTPException(status_code=404, detail=f"Missing demo files: {missing}")
 
     results = []
     for name in DEMO_FILES:
@@ -407,9 +436,8 @@ async def summarise_demo():
 
 @app.post("/summarise_upload")
 async def summarise_upload(files: List[UploadFile] = File(...)):
-    """Upload up to 3 PDFs and generate summaries for each."""
-    if not files or len(files) == 0:
-        raise HTTPException(status_code=400, detail="Please upload at least one PDF (max 3).")
+    if not files:
+        raise HTTPException(status_code=400, detail="Please upload at least one PDF.")
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 PDFs allowed per request.")
 
@@ -418,16 +446,11 @@ async def summarise_upload(files: List[UploadFile] = File(...)):
         if not uf.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail=f"Only PDF files are supported: {uf.filename}")
 
-        # Safe temp copy
-        safe_name = re.sub(r"[^\w\-. ()]", "_", uf.filename)  # keep readable names
+        safe_name = re.sub(r"[^\w\-. ()]", "_", uf.filename)
         temp_path = os.path.join("/tmp", safe_name)
         with open(temp_path, "wb") as out:
             shutil.copyfileobj(uf.file, out)
 
-        # Summarise & generate
         results.append(_summarise_and_generate(temp_path))
-
-        # Cleanup temp if you want (keep for debugging on free tier)
-        # os.remove(temp_path)
 
     return JSONResponse({"status": "success", "mode": "upload", "results": results})
