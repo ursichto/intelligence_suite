@@ -1,26 +1,35 @@
+# 🧩 What this file covers
+# Area	                    Packages	Purpose
+# Web API framework	        fastapi, uvicorn, starlette	Serves endpoints /summarise_demo, /summarise_upload, /files/...
+# OpenAI client	            openai	Connects to GPT-4o-mini for summarisation
+# Document handling         PyPDF2, python-docx, reportlab, pillow	Extracts text, generates PDFs/DOCX with logos and formatting
+# External APIs	requests	Uploads summaries to Chatbase dynamically
+# Utility	                pytz (for older zoneinfo fallback)	Ensures timezone compatibility
+# Validation	            pydantic, pydantic-settings	Optional but recommended for future structured configs
+
+# --- Core Framework ---
+fastapi==0.115.0
+uvicorn==0.30.6
+
 # Core LLM and OpenAI client
-openai>=1.35.10
+openai==1.50.2
 
-# PDF parsing
-PyPDF2>=3.0.1
+# --- PDF / DOCX Handling ---
+PyPDF2==3.0.1
+python-docx==1.1.0
+reportlab==4.2.4
+pillow==10.4.0
 
-# Word (DOCX) generation
-python-docx>=1.1.0
-
-# PDF generation
-reportlab>=4.2.2
-
-# Image and logo handling
-Pillow>=10.3.0
+# --- Networking / API Calls ---
+requests==2.32.3
 
 # Timezone and date handling
-tzdata>=2024.1
+pytz>=2024.1
+
+# --- CORS / Middleware ---
+starlette==0.38.2
 
 # Environment variable management
 python-dotenv>=1.0.1
 python-multipart>=0.0.6
-
-# Optional — if you plan to host a minimal REST API for the demo (Render-ready)
-fastapi>=0.115.0
-uvicorn>=0.30.6
-
+pydantic-settings==2.3.3
