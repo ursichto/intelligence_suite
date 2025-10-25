@@ -1,4 +1,4 @@
-#
+# 
 # Transformate Intelligence Suite (Dual Mode + Chatbase Integration)
 #
 
@@ -20,15 +20,12 @@ from typing import List, Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from PyPDF2 import PdfReader
 from openai import OpenAI
-
-# ReportLab / DOCX deps
-from docx import Document
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, HRFlowable
@@ -36,21 +33,24 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from PIL import Image as PILImage
 
+
 # === CONFIGURATION ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")  # <-- must be set in Render dashboard
-CHATBASE_BOT_ID = "eJ86MiNhODp3671KJoMTN"
-
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
+
+CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")  # 🔐 Add this to Render Environment Variables
+CHATBASE_AGENT_ID = "eJ86MiNhODp3671KJoMTN"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 MODEL = "gpt-4o-mini"
 
+# Pricing constants
 USD_PER_1K_PROMPT = 0.00015
 USD_PER_1K_COMPLETION = 0.00060
 CHF_CONVERSION_RATE = 0.80
 
+# Paths
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 INPUT_FOLDER = os.path.join(BASE_DIR, "input_reports")
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "summaries")
@@ -65,6 +65,7 @@ DEMO_FILES = [
     "FINMA rs 2018 02 - Duty to report securities transactions.pdf",
 ]
 
+
 # ---------- Helpers ----------
 
 def extract_text_from_pdf(path: str) -> str:
@@ -76,6 +77,7 @@ def extract_text_from_pdf(path: str) -> str:
         if page_text:
             text += page_text + "\n"
     return text.strip()
+
 
 def summarise_text(text: str, filename: str):
     """Generate executive summary and return summary + token/cost stats."""
@@ -112,32 +114,34 @@ def summarise_text(text: str, filename: str):
 def push_to_chatbase(title: str, summary_text: str):
     """Send generated summary text to Chatbase knowledge base for live querying."""
     if not CHATBASE_API_KEY:
-        print("⚠️ CHATBASE_API_KEY not configured — skipping Chatbase push.")
+        print("⚠️ CHATBASE_API_KEY not configured — skipping Chatbase upload.")
         return False
-    url = "https://www.chatbase.co/api/knowledge"
+
+    url = f"https://www.chatbase.co/api/v1/chatbots/{CHATBASE_AGENT_ID}/documents"
     headers = {
         "Authorization": f"Bearer {CHATBASE_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
-        "chatbotId": CHATBASE_BOT_ID,
-        "documents": [
-            {
-                "title": title,
-                "content": summary_text[:18000]  # safeguard against oversized payloads
-            }
-        ],
+        "name": title,
+        "type": "text",
+        "content": summary_text[:18000],  # safeguard against oversized payloads
     }
+
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=20)
-        r.raise_for_status()
-        print(f"✅ Summary '{title}' uploaded to Chatbase.")
-        return True
+        if r.status_code == 200:
+            print(f"✅ Summary '{title}' successfully uploaded to Chatbase.")
+            return True
+        else:
+            print(f"⚠️ Chatbase upload failed [{r.status_code}]: {r.text}")
+            return False
     except Exception as e:
-        print(f"⚠️ Failed to upload summary '{title}' to Chatbase: {e}")
+        print(f"❌ Failed to upload summary '{title}' to Chatbase: {e}")
         return False
 
-# ---------- DOCX and PDF GENERATION
+
+# ---------- DOCX and PDF GENERATION ----------
 # ---------- DOCX (kept intact; not used by demo endpoints unless you want it) ----------
 
 def save_to_docx(
@@ -164,6 +168,7 @@ def save_to_docx(
 
     dt = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%B %d %Y, %H:%M CET")
 
+    from docx import Document
     doc = Document()
 
     # Cover logo
@@ -229,7 +234,6 @@ def save_to_docx(
 
 
 # ---------- PDF (exact formatting preserved) ----------
-
 def save_to_pdf(
     summary_text: str,
     filename: str,
@@ -251,7 +255,6 @@ def save_to_pdf(
         exec_title = os.path.splitext(src_name)[0]
     dt = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%B %d %Y, %H:%M CET")
 
-    # remove redundant "Executive Summary:" line from summary_text
     summary_text = re.sub(r"^(\*\*)?\s*Executive Summary\s*:?.*\n?", "", summary_text, flags=re.I)
 
     doc = SimpleDocTemplate(
@@ -303,7 +306,6 @@ def save_to_pdf(
     story.append(Paragraph(f"Source Document: {html.escape(src_name)}", cover_text))
     story.append(Paragraph("Prepared by: Transformate Consulting | AI Generated Summary", cover_text))
 
-    # AI Processing Summary (if values provided)
     if all(v is not None for v in [prompt_tokens, completion_tokens, total_tokens, usd_cost, chf_cost]):
         story.append(Spacer(1, 8))
         story.append(Paragraph("AI Processing Summary:", cover_label))
@@ -327,7 +329,6 @@ def save_to_pdf(
     story.append(Paragraph("W: www.transformate.ch", cover_text))
     story.append(PageBreak())
 
-    # --- SUMMARY ---
     story.append(Paragraph(title, heading))
     for line in [l.strip() for l in summary_text.split("\n") if l.strip()]:
         clean_line = line.strip()
@@ -358,7 +359,7 @@ def save_to_pdf(
 
 # ---------- FastAPI App ----------
 
-app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.1")
+app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -383,7 +384,7 @@ async def get_file(path: str):
     return FileResponse(full_path, media_type="application/pdf")
 
 
-def _summarise_and_generate(pdf_path: str) -> dict:
+def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks) -> dict:
     """Summarise a single PDF, generate a summary PDF, and push to Chatbase."""
     if not pdf_path.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail=f"Only PDF files are supported: {os.path.basename(pdf_path)}")
@@ -406,8 +407,8 @@ def _summarise_and_generate(pdf_path: str) -> dict:
         chf_cost=chf,
     )
 
-    # === NEW: Push summary to Chatbase Knowledge API ===
-    push_to_chatbase(base_name, summary)
+    # ✅ Push summary to Chatbase in background (non-blocking)
+    background_tasks.add_task(push_to_chatbase, base_name, summary)
 
     public_url = f"/files/{os.path.basename(output_pdf)}"
 
@@ -421,7 +422,7 @@ def _summarise_and_generate(pdf_path: str) -> dict:
 
 
 @app.post("/summarise_demo")
-async def summarise_demo():
+async def summarise_demo(background_tasks: BackgroundTasks):
     missing = [f for f in DEMO_FILES if not os.path.isfile(os.path.join(INPUT_FOLDER, f))]
     if missing:
         raise HTTPException(status_code=404, detail=f"Missing demo files: {missing}")
@@ -429,13 +430,13 @@ async def summarise_demo():
     results = []
     for name in DEMO_FILES:
         pdf_path = os.path.join(INPUT_FOLDER, name)
-        results.append(_summarise_and_generate(pdf_path))
+        results.append(_summarise_and_generate(pdf_path, background_tasks))
 
     return JSONResponse({"status": "success", "mode": "demo", "results": results})
 
 
 @app.post("/summarise_upload")
-async def summarise_upload(files: List[UploadFile] = File(...)):
+async def summarise_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="Please upload at least one PDF.")
     if len(files) > 3:
@@ -451,6 +452,6 @@ async def summarise_upload(files: List[UploadFile] = File(...)):
         with open(temp_path, "wb") as out:
             shutil.copyfileobj(uf.file, out)
 
-        results.append(_summarise_and_generate(temp_path))
+        results.append(_summarise_and_generate(temp_path, background_tasks))
 
     return JSONResponse({"status": "success", "mode": "upload", "results": results})
