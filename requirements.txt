@@ -12,7 +12,7 @@ fastapi==0.115.0
 uvicorn==0.30.6
 
 # Core LLM and OpenAI client
-openai==1.35.10
+openai>=1.30.0
 
 # --- PDF / DOCX Handling ---
 PyPDF2==3.0.1
@@ -33,4 +33,5 @@ starlette==0.38.2
 python-dotenv>=1.0.1
 python-multipart>=0.0.6
 pydantic-settings==2.3.3
+
 
