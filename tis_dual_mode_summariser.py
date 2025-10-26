@@ -1,15 +1,5 @@
-# 
-# Transformate Intelligence Suite (Dual Mode + Chatbase Integration)
-#
-
-#
-# Below is a drop-in FastAPI web service that keeps your exact PDF formatting logic and adds dual mode:
-#
-# POST /summarise_demo → runs all 3 fixed PDFs you listed (reads them from input_reports/).
-# POST /summarise_upload → accepts up to 3 user PDFs and returns summaries.
-# GET /files/{path:path} → serves generated PDFs (so Carrd can link/download).
-# GET / → healthcheck.
-#
+# tis_dual_mode_summariser.py
+# Transformate Intelligence Suite (Dual Mode + Chatbase Integration + Session Isolation + Invisible Context Injection)
 
 import os
 import re
@@ -20,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -33,19 +23,18 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from PIL import Image as PILImage
 
-
 # === CONFIGURATION ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
 
-CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")  # 🔐 Add this to Render Environment Variables
-CHATBASE_AGENT_ID = "eJ86MiNhODp3671KJoMTN"
+CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")  # optional but recommended
+CHATBASE_AGENT_ID = os.getenv("CHATBASE_AGENT_ID", "eJ86MiNhODp3671KJoMTN")  # your current ID
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 MODEL = "gpt-4o-mini"
 
-# Pricing constants
+# Pricing constants (unchanged)
 USD_PER_1K_PROMPT = 0.00015
 USD_PER_1K_COMPLETION = 0.00060
 CHF_CONVERSION_RATE = 0.80
@@ -65,8 +54,14 @@ DEMO_FILES = [
     "FINMA rs 2018 02 - Duty to report securities transactions.pdf",
 ]
 
-
 # ---------- Helpers ----------
+
+def get_session_folder(session_id: Optional[str]) -> str:
+    """Return a safe subfolder for a given session."""
+    safe_id = re.sub(r"[^\w\-]", "_", session_id or "default")
+    folder = os.path.join(OUTPUT_FOLDER, safe_id)
+    os.makedirs(folder, exist_ok=True)
+    return folder
 
 def extract_text_from_pdf(path: str) -> str:
     """Extract text from a PDF."""
@@ -78,20 +73,18 @@ def extract_text_from_pdf(path: str) -> str:
             text += page_text + "\n"
     return text.strip()
 
-
 def summarise_text(text: str, filename: str):
     """Generate executive summary and return summary + token/cost stats."""
     prompt = f"""
-    You are an expert financial analyst.
-    Summarise the following document into a concise executive summary (max 400 words).
-    Include:
-    - Main purpose or regulatory intent
-    - Key operational or compliance impacts
-    - 3–5 recommended next steps for an executive team.
+You are an expert financial analyst.
+Summarise the following document into a concise executive summary (max 400 words).
+Include:
+- Main purpose or regulatory intent
+- Key operational or compliance impacts
+- 3–5 recommended next steps for an executive team.
 
-    Document: {text[:12000]}
-    """
-
+Document: {text[:12000]}
+"""
     response = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -100,22 +93,20 @@ def summarise_text(text: str, filename: str):
 
     summary = response.choices[0].message.content.strip()
     usage = response.usage
-    prompt_tokens = usage.prompt_tokens
-    completion_tokens = usage.completion_tokens
-    total_tokens = usage.total_tokens
-
+    prompt_tokens = getattr(usage, "prompt_tokens", 0)
+    completion_tokens = getattr(usage, "completion_tokens", 0)
+    total_tokens = getattr(usage, "total_tokens", prompt_tokens + completion_tokens)
     usd_cost = (prompt_tokens / 1000) * USD_PER_1K_PROMPT + (completion_tokens / 1000) * USD_PER_1K_COMPLETION
     chf_cost = usd_cost * CHF_CONVERSION_RATE
 
     return summary, prompt_tokens, completion_tokens, total_tokens, usd_cost, chf_cost
 
-# === Chatbase Integration ===
-def push_to_chatbase(title: str, summary_text: str):
-    """Send generated summary text to Chatbase for live querying."""
+# === Chatbase: push summary as "document" (optional) ===
+def push_to_chatbase(title: str, summary_text: str) -> bool:
+    """Send generated summary text to Chatbase as a document (optional)."""
     if not CHATBASE_API_KEY:
         print("⚠️ CHATBASE_API_KEY not configured — skipping Chatbase upload.")
         return False
-
     url = f"https://www.chatbase.co/api/v1/chatbots/{CHATBASE_AGENT_ID}/documents"
     headers = {
         "Authorization": f"Bearer {CHATBASE_API_KEY}",
@@ -124,115 +115,21 @@ def push_to_chatbase(title: str, summary_text: str):
     payload = {
         "name": title,
         "type": "text",
-        "content": summary_text[:18000]  # safeguard against oversized payloads
+        "content": summary_text[:18000],
     }
-
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=20)
         if r.status_code == 200:
-            print(f"✅ Summary '{title}' successfully uploaded to Chatbase.")
+            print(f"✅ Summary '{title}' uploaded to Chatbase.")
             return True
-        else:
-            print(f"⚠️ Chatbase upload failed [{r.status_code}]: {r.text}")
-            return False
+        print(f"⚠️ Chatbase upload failed [{r.status_code}]: {r.text}")
+        return False
     except Exception as e:
-        print(f"❌ Failed to upload summary '{title}' to Chatbase: {e}")
+        print(f"❌ Chatbase upload error '{title}': {e}")
         return False
 
+# ---------- DOCX and PDF GENERATION (unchanged visual output) ----------
 
-# ---------- DOCX and PDF GENERATION ----------
-# ---------- DOCX (kept intact; not used by demo endpoints unless you want it) ----------
-
-def save_to_docx(
-    summary_text: str,
-    filename: str,
-    source_document: Optional[str] = None,
-    prompt_tokens: Optional[int] = None,
-    completion_tokens: Optional[int] = None,
-    total_tokens: Optional[int] = None,
-    usd_cost: Optional[float] = None,
-    chf_cost: Optional[float] = None,
-):
-    """Save summary text to a Word document with cover page and accurate logo scaling (no blank page)."""
-    from docx.shared import Pt, Inches
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-    src_name = os.path.basename(source_document) if source_document else ""
-    first_line = next((l.strip() for l in summary_text.split("\n") if l.strip()), "")
-    clean_first = first_line.replace("**", "").strip("* ").strip()
-    m = re.search(r"Executive Summary\s*:\s*(.*)", clean_first, flags=re.I)
-    exec_title = m.group(1).strip() if m and m.group(1).strip() else clean_first
-    if not exec_title:
-        exec_title = os.path.splitext(src_name)[0]
-
-    dt = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%B %d %Y, %H:%M CET")
-
-    from docx import Document
-    doc = Document()
-
-    # Cover logo
-    if os.path.exists(LOGO_PATH):
-        with PILImage.open(LOGO_PATH) as img:
-            width, height = img.size
-            target_width = Inches(2.2)
-            aspect_ratio = height / width
-            target_height = target_width * aspect_ratio
-        doc.add_picture(LOGO_PATH, width=target_width, height=target_height)
-        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.LEFT
-
-    p_title = doc.add_paragraph("Executive Summary")
-    p_title.style = doc.styles["Title"]
-    p_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
-    doc.add_paragraph("")
-    doc.add_paragraph("Executive Summary Title:").runs[0].bold = True
-    doc.add_paragraph(exec_title)
-    doc.add_paragraph("")
-    doc.add_paragraph(f"Generated on: {dt}")
-    doc.add_paragraph(f"Source Document: {src_name}")
-    doc.add_paragraph("Prepared by: Transformate Consulting | AI Generated Summary")
-
-    if all(v is not None for v in [prompt_tokens, completion_tokens, total_tokens, usd_cost, chf_cost]):
-        doc.add_paragraph("")
-        p = doc.add_paragraph("AI Processing Summary:")
-        p.runs[0].bold = True
-        doc.add_paragraph(
-            f"Prompt Tokens: {prompt_tokens:,} | Completion Tokens: {completion_tokens:,} | Total: {total_tokens:,}"
-        )
-        doc.add_paragraph(f"Estimated Cost: USD ${usd_cost:.4f} ≈ CHF {chf_cost:.4f}")
-
-    doc.add_paragraph("")
-    doc.add_paragraph("Contact:")
-    doc.add_paragraph("Tony Ursich")
-    doc.add_paragraph("Chief Information Officer | Transformate Consulting")
-    doc.add_paragraph("E: tony.ursich@transformate.ch")
-    doc.add_paragraph("T: +41 76 577 1165")
-    doc.add_paragraph("W: www.transformate.ch")
-
-    # No forced page break (prevents blank page); small gap then heading.
-    doc.add_paragraph("\n" * 2)
-
-    # Summary pages
-    doc.add_heading("Executive Summary\n", level=1)
-
-    # Remove redundant "Executive Summary:" line from body
-    summary_text = re.sub(r"^(\*\*)?\s*Executive Summary\s*:?.*\n?", "", summary_text, flags=re.I)
-
-    paragraphs = [p.strip() for p in summary_text.split("\n") if p.strip()]
-    for para in paragraphs:
-        p = doc.add_paragraph()
-        parts = re.split(r"(\*\*.+?\*\*)", para)
-        for part in parts:
-            clean_text = part.replace("**", "")
-            run = p.add_run(clean_text)
-            if part.startswith("**") and part.endswith("**"):
-                run.bold = True
-            run.font.size = Pt(11)
-
-    doc.save(filename)
-
-
-# ---------- PDF (exact formatting preserved) ----------
 def save_to_pdf(
     summary_text: str,
     filename: str,
@@ -355,10 +252,9 @@ def save_to_pdf(
 
     doc.build(story)
 
-
 # ---------- FastAPI App ----------
 
-app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.2")
+app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -368,11 +264,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 async def health():
     return {"status": "ok", "service": "Transformate Intelligence Suite + Chatbase"}
-
 
 @app.get("/files/{path:path}")
 async def get_file(path: str):
@@ -382,19 +276,19 @@ async def get_file(path: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(full_path, media_type="application/pdf")
 
-
-def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks) -> dict:
-    """Summarise a single PDF, generate a summary PDF, and push to Chatbase."""
+def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks, session_folder: str) -> dict:
+    """Summarise a single PDF, generate a summary PDF, save a .txt, and (optionally) push to Chatbase."""
     if not pdf_path.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail=f"Only PDF files are supported: {os.path.basename(pdf_path)}")
 
     text = extract_text_from_pdf(pdf_path)
     summary, pt, ct, tt, usd, chf = summarise_text(text, os.path.basename(pdf_path))
 
-    # Output paths
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    output_pdf = os.path.join(OUTPUT_FOLDER, f"Summary_{base_name}.pdf")
+    output_pdf = os.path.join(session_folder, f"Summary_{base_name}.pdf")
+    txt_path = os.path.join(session_folder, f"Summary_{base_name}.txt")
 
+    # Save PDF
     save_to_pdf(
         summary,
         output_pdf,
@@ -406,11 +300,19 @@ def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks) ->
         chf_cost=chf,
     )
 
-    # ✅ Push summary to Chatbase in background (non-blocking)
-    background_tasks.add_task(push_to_chatbase, base_name, summary)
+    # Save TXT (for context retrieval)
+    clean_title = base_name
+    dt = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%Y-%m-%d %H:%M CET")
+    header = f"Executive Summary Title: {clean_title}\nGenerated: {dt}\n"
+    body = re.sub(r"^\s*(Executive Summary\s*:?\s*)", "", summary.strip(), flags=re.I)
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(header + "\n" + body.strip() + "\n")
 
-    public_url = f"/files/{os.path.basename(output_pdf)}"
+    # Optional: push to Chatbase as document (non-blocking)
+    if CHATBASE_API_KEY:
+        background_tasks.add_task(push_to_chatbase, base_name, summary)
 
+    public_url = f"/files/{os.path.relpath(output_pdf, OUTPUT_FOLDER).replace(os.sep, '/')}"
     return {
         "filename": os.path.basename(pdf_path),
         "summary_file": public_url,
@@ -419,9 +321,9 @@ def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks) ->
         "summary_preview": summary[:500] + ("..." if len(summary) > 500 else ""),
     }
 
-
 @app.post("/summarise_demo")
-async def summarise_demo(background_tasks: BackgroundTasks):
+async def summarise_demo(background_tasks: BackgroundTasks, session_id: Optional[str] = Query(default=None)):
+    session_folder = get_session_folder(session_id)
     missing = [f for f in DEMO_FILES if not os.path.isfile(os.path.join(INPUT_FOLDER, f))]
     if missing:
         raise HTTPException(status_code=404, detail=f"Missing demo files: {missing}")
@@ -429,13 +331,18 @@ async def summarise_demo(background_tasks: BackgroundTasks):
     results = []
     for name in DEMO_FILES:
         pdf_path = os.path.join(INPUT_FOLDER, name)
-        results.append(_summarise_and_generate(pdf_path, background_tasks))
+        results.append(_summarise_and_generate(pdf_path, background_tasks, session_folder))
 
     return JSONResponse({"status": "success", "mode": "demo", "results": results})
 
-
 @app.post("/summarise_upload")
-async def summarise_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+async def summarise_upload(
+    background_tasks: BackgroundTasks,
+    session_id: Optional[str] = Query(default=None),
+    files: List[UploadFile] = File(...),
+):
+    session_folder = get_session_folder(session_id)
+
     if not files:
         raise HTTPException(status_code=400, detail="Please upload at least one PDF.")
     if len(files) > 3:
@@ -451,6 +358,98 @@ async def summarise_upload(background_tasks: BackgroundTasks, files: List[Upload
         with open(temp_path, "wb") as out:
             shutil.copyfileobj(uf.file, out)
 
-        results.append(_summarise_and_generate(temp_path, background_tasks))
+        results.append(_summarise_and_generate(temp_path, background_tasks, session_folder))
 
     return JSONResponse({"status": "success", "mode": "upload", "results": results})
+
+# ---------- Invisible Context Injection → Chatbase (with OpenAI fallback) ----------
+
+def _load_recent_context(session_folder: str, max_files: int = 3, max_chars: int = 12000) -> str:
+    """Load up to max_files most-recent .txt summaries and concatenate, truncated."""
+    if not os.path.isdir(session_folder):
+        return ""
+    txts = [f for f in os.listdir(session_folder) if f.lower().endswith(".txt")]
+    # Sort by filesystem mtime desc
+    txts.sort(key=lambda fn: os.path.getmtime(os.path.join(session_folder, fn)), reverse=True)
+    chunks = []
+    total = 0
+    for fname in txts[:max_files]:
+        p = os.path.join(session_folder, fname)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                t = f.read().strip()
+            if not t:
+                continue
+            # soft cap to avoid enormous single request
+            room = max_chars - total
+            if room <= 0:
+                break
+            chunks.append(t[:room])
+            total += min(len(t), room)
+        except Exception:
+            continue
+    return "\n\n".join(chunks).strip()
+
+@app.post("/ask_with_context")
+async def ask_with_context(payload: dict, session_id: Optional[str] = Query(default=None)):
+    """
+    Invisible injection:
+      1) Load this session's cached summaries (.txt) as context
+      2) Prepend context to the user's query
+      3) Send a single user message to Chatbase /api/v1/chat
+      4) If Chatbase fails, fallback to OpenAI directly
+    """
+    user_query = (payload or {}).get("query", "").strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="Missing 'query' in request body.")
+    session_folder = get_session_folder(session_id)
+    context = _load_recent_context(session_folder)
+
+    injected = (
+        "You are the Transformate Intelligence Suite assistant. "
+        "Use ONLY the following context to answer. If the context is irrelevant or empty, say you don't have enough information.\n\n"
+        f"=== CONTEXT START ===\n{context}\n=== CONTEXT END ===\n\n"
+        f"User: {user_query}"
+    )
+
+    # Try Chatbase first (keeps the same 'voice' as the widget)
+    if CHATBASE_API_KEY:
+        try:
+            url = "https://www.chatbase.co/api/v1/chat"
+            headers = {
+                "Authorization": f"Bearer {CHATBASE_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            body = {
+                "chatbotId": CHATBASE_AGENT_ID,
+                "messages": [{"role": "user", "content": injected}],
+            }
+            r = requests.post(url, headers=headers, json=body, timeout=25)
+            if r.ok:
+                data = r.json()
+                # Chatbase usually returns {"message": "..."} or {"text": "..."} depending on plan/version
+                reply = data.get("message") or data.get("text") or data.get("reply") or ""
+                if reply:
+                    return {"reply": reply.strip(), "source": "chatbase", "used_context": bool(context)}
+                # Some responses come as array
+                if isinstance(data, dict) and "messages" in data:
+                    msgs = data.get("messages") or []
+                    if msgs and isinstance(msgs, list):
+                        last = msgs[-1]
+                        if isinstance(last, dict):
+                            content = last.get("content") or last.get("text") or ""
+                            if content:
+                                return {"reply": content.strip(), "source": "chatbase", "used_context": bool(context)}
+            else:
+                print(f"⚠️ Chatbase chat failed [{r.status_code}]: {r.text}")
+        except Exception as e:
+            print(f"❌ Chatbase chat exception: {e}")
+
+    # Fallback: call OpenAI directly so user isn't blocked
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": injected}],
+        temperature=0.3,
+    )
+    fallback = response.choices[0].message.content.strip()
+    return {"reply": fallback, "source": "openai-fallback", "used_context": bool(context)}
