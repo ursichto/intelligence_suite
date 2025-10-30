@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, Form, Response
 from batch_report_summariser import summarise_text
 from PyPDF2 import PdfReader
-import os
+import json, os
 
 app = FastAPI()
 
@@ -59,14 +59,28 @@ async def log_event(request: Request):
     except Exception as e:
         return {"status":"error","message":str(e)}
 
-@app.get("/analytics")
-def get_analytics():
-    import json
-    with open("analytics_store.json") as f:
-        return json.load(f)
     
 
 # --- Privacy-safe Analytics: HTML Dashboard ---
+@app.get("/analytics_overview")
+def analytics_overview():
+    """Return cumulative analytics with simple daily breakdown if available."""
+    store_path = "analytics_store.json"
+    if not os.path.exists(store_path):
+        return JSONResponse({"message": "No analytics data yet."})
+
+    with open(store_path, "r") as f:
+        data = json.load(f)
+
+    # Compute totals
+    totals = {k: sum(v.values()) if isinstance(v, dict) else v for k, v in data.items()}
+    return JSONResponse({
+        "summary": totals,
+        "raw_data": data
+    })
+
+
+
 @app.get("/analytics")
 def analytics_dashboard():
     # NOTE: Using CDN for Chart.js (no tracking, pure JS bundle)
