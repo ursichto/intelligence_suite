@@ -80,6 +80,27 @@ def analytics_overview():
     })
 
 
+@app.get("/analytics_data")
+def analytics_data():
+    """Provide analytics JSON to the dashboard frontend."""
+    store_path = "analytics_store.json"
+    if not os.path.exists(store_path):
+        return {
+            "totals": {"sessions": 0, "queries": 0, "uploads": 0, "demo_runs": 0},
+            "daily": {}
+        }
+
+    with open(store_path, "r") as f:
+        data = json.load(f)
+
+    # Handle both formats (your new and old file structures)
+    daily = data.get("daily", {})
+    totals = data.get("totals", {})
+
+    return {"totals": totals, "daily": daily}
+
+
+
 
 @app.get("/analytics")
 def analytics_dashboard():
