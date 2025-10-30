@@ -578,8 +578,8 @@ def analytics_dashboard():
     <section class="panels">
       <div class="card"><h3>Total Sessions</h3><div class="big" id="t_sessions">0</div></div>
       <div class="card"><h3>Total Queries</h3><div class="big" id="t_queries">0</div></div>
-      <div class="card"><h3>Total Uploads</h3><div class="big" id="t_uploads">0</div></div>
-      <div class="card"><h3>Total Demo Runs</h3><div class="big" id="t_demo">0</div></div>
+      <div class="card"><h3>Total Fixed Demo Runs</h3><div class="big" id="t_demo">0</div></div>
+      <div class="card"><h3>Total Own Upload Runs</h3><div class="big" id="t_uploads">0</div></div>
     </section>
 
     <div class="canvas"><canvas id="dailyLine" height="120"></canvas></div>
