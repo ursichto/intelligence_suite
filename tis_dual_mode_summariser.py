@@ -489,6 +489,15 @@ async def log_event(request: Request):
     except Exception as e:
         return {"status":"error","message":str(e)}
 
+
+
+@app.post("/analytics_reset")
+def analytics_reset():
+    """Reset all analytics totals and daily data."""
+    file = "analytics_store.json"
+    if os.path.exists(file):
+        os.remove(file)
+    return {"status": "ok", "message": "Analytics store reset successfully."}
     
 
 # --- Privacy-safe Analytics: HTML Dashboard ---
