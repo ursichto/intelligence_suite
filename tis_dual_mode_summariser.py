@@ -276,6 +276,16 @@ async def get_file(path: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(full_path, media_type="application/pdf")
 
+@app.get("/logo.png")
+async def serve_logo():
+    """Serve the Transformate Consulting logo from static file storage."""
+    logo_path = os.path.join(BASE_DIR, "Transformate Logo - Transparent - Large Sphere.png")
+    if not os.path.exists(logo_path):
+        raise HTTPException(status_code=404, detail="Logo not found")
+    return FileResponse(logo_path, media_type="image/png")
+
+
+
 def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks, session_folder: str) -> dict:
     """Summarise a single PDF, generate a summary PDF, save a .txt, and (optionally) push to Chatbase."""
     if not pdf_path.lower().endswith(".pdf"):
@@ -578,8 +588,8 @@ def analytics_dashboard():
     <section class="panels">
       <div class="card"><h3>Total Sessions</h3><div class="big" id="t_sessions">0</div></div>
       <div class="card"><h3>Total Queries</h3><div class="big" id="t_queries">0</div></div>
-      <div class="card"><h3>Total Fixed Demo Runs</h3><div class="big" id="t_demo">0</div></div>
-      <div class="card"><h3>Total Own Upload Runs</h3><div class="big" id="t_uploads">0</div></div>
+      <div class="card"><h3>Total Uploads</h3><div class="big" id="t_uploads">0</div></div>
+      <div class="card"><h3>Total Demo Runs</h3><div class="big" id="t_demo">0</div></div>
     </section>
 
     <div class="canvas"><canvas id="dailyLine" height="120"></canvas></div>
