@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Response, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from PyPDF2 import PdfReader
 from openai import OpenAI
@@ -275,6 +276,11 @@ def save_to_pdf(
 # ---------- FastAPI App ----------
 
 app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.3")
+
+
+# Serve root-level static assets (like logos, Open Graph images, etc.)
+app.mount("/", StaticFiles(directory=BASE_DIR, html=False), name="static-root")
+
 
 app.add_middleware(
     CORSMiddleware,
