@@ -54,11 +54,24 @@ DEMO_FILES = [
     "FINMA rs 2018 02 - Duty to report securities transactions.pdf",
 ]
 
-#  === Logging of render instance runtime files
-print("\n📁 Deployed files under BASE_DIR:\n")
+#  === Logging of Render instance runtime files
+print("\n📁 Listing only Transformate project files:\n")
+
+INCLUDE_FOLDERS = {"summaries", "input_reports"}  # optional subfolders you care about
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
 for root, dirs, files in os.walk(BASE_DIR):
-    for f in files:
-        print(os.path.join(root, f))
+    rel_path = os.path.relpath(root, BASE_DIR)
+
+    # Skip system folders and dependencies
+    if rel_path.startswith(("venv", ".venv", "__pycache__", "site-packages", "usr", "lib")):
+        continue
+
+    # If it's a target folder or the base directory
+    if rel_path == "." or rel_path in INCLUDE_FOLDERS:
+        for f in files:
+            if f.lower().endswith((".png", ".jpg", ".jpeg", ".pdf", ".py", ".json")):
+                print(os.path.join(rel_path, f))
 
 
 # ---------- Helpers ----------
