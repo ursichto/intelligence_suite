@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from concurrent.futures import ThreadPoolExecutor
+
 from PyPDF2 import PdfReader
 from openai import OpenAI
 from reportlab.lib.pagesizes import A4
@@ -355,6 +357,22 @@ def _summarise_and_generate(pdf_path: str, background_tasks: BackgroundTasks, se
         "summary_preview": summary[:500] + ("..." if len(summary) > 500 else ""),
     }
 
+#-- Serial processing of demo files
+#@app.post("/summarise_demo")
+#async def summarise_demo(background_tasks: BackgroundTasks, session_id: Optional[str] = Query(default=None)):
+#    session_folder = get_session_folder(session_id)
+#    missing = [f for f in DEMO_FILES if not os.path.isfile(os.path.join(INPUT_FOLDER, f))]
+#    if missing:
+#        raise HTTPException(status_code=404, detail=f"Missing demo files: {missing}")
+#
+#    results = []
+#    for name in DEMO_FILES:
+#        pdf_path = os.path.join(INPUT_FOLDER, name)
+#        results.append(_summarise_and_generate(pdf_path, background_tasks, session_folder))#
+#
+#    return JSONResponse({"status": "success", "mode": "demo", "results": results})
+
+#-- Parallel processing of demo files
 @app.post("/summarise_demo")
 async def summarise_demo(background_tasks: BackgroundTasks, session_id: Optional[str] = Query(default=None)):
     session_folder = get_session_folder(session_id)
@@ -363,11 +381,13 @@ async def summarise_demo(background_tasks: BackgroundTasks, session_id: Optional
         raise HTTPException(status_code=404, detail=f"Missing demo files: {missing}")
 
     results = []
-    for name in DEMO_FILES:
-        pdf_path = os.path.join(INPUT_FOLDER, name)
-        results.append(_summarise_and_generate(pdf_path, background_tasks, session_folder))
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(_summarise_and_generate, os.path.join(INPUT_FOLDER, n), background_tasks, session_folder) for n in DEMO_FILES]
+        for f in futures:
+            results.append(f.result())
 
     return JSONResponse({"status": "success", "mode": "demo", "results": results})
+
 
 @app.post("/summarise_upload")
 async def summarise_upload(
