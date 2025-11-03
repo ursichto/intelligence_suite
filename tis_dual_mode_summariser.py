@@ -54,6 +54,13 @@ DEMO_FILES = [
     "FINMA rs 2018 02 - Duty to report securities transactions.pdf",
 ]
 
+#  === Logging of render instance runtime files
+print("\n📁 Deployed files under BASE_DIR:\n")
+for root, dirs, files in os.walk(BASE_DIR):
+    for f in files:
+        print(os.path.join(root, f))
+
+
 # ---------- Helpers ----------
 
 def get_session_folder(session_id: Optional[str]) -> str:
