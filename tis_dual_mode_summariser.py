@@ -96,16 +96,23 @@ def extract_text_from_pdf(path: str) -> str:
 
 def summarise_text(text: str, filename: str):
     """Generate executive summary and return summary + token/cost stats."""
-    prompt = f"""
+
+prompt = f"""
 You are an expert financial analyst.
-Summarise the following document into a concise executive summary (max 400 words).
+Read the following document, automatically detect its language, 
+and summarise it into a concise executive summary of up to 400 words.
+The summary must be written in the SAME LANGUAGE as the source document.
+
 Include:
 - Main purpose or regulatory intent
 - Key operational or compliance impacts
 - 3–5 recommended next steps for an executive team.
 
-Document: {text[:12000]}
+Document:
+{text[:12000]}
 """
+
+
     response = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
