@@ -49,7 +49,7 @@ OUTPUT_FOLDER = os.path.join(BASE_DIR, "summaries")
 os.makedirs(INPUT_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-LOGO_PATH = os.path.join(BASE_DIR, "Transformate Logo.png")
+LOGO_PATH = os.path.join(BASE_DIR, "assets", "transformate_pdf_logo.png")
 
 DEMO_FILES = [
     "FINMA rs 2011 02 20200101 - Capital buffer and capital planning - banks.pdf",
@@ -242,10 +242,10 @@ def save_to_pdf(
     story.append(Spacer(1, 8))
     story.append(Paragraph("Contact:", cover_label))
     story.append(Paragraph("Tony Ursich", cover_text))
-    story.append(Paragraph("Chief Information Officer | Transformate Consulting", cover_text))
-    story.append(Paragraph("E: tony.ursich@transformate.ch", cover_text))
+    story.append(Paragraph("Founder | Transformate Consulting", cover_text))
+    story.append(Paragraph("E: tony.ursich@gmail.com", cover_text))
     story.append(Paragraph("T: +41 76 577 1165", cover_text))
-    story.append(Paragraph("W: www.transformate.ch", cover_text))
+#    story.append(Paragraph("W: www.transformate.ch", cover_text))
     story.append(PageBreak())
 
     story.append(Paragraph(title, heading))
@@ -280,7 +280,8 @@ def save_to_pdf(
 app = FastAPI(title="Transformate Intelligence Suite (Dual Mode + Chatbase)", version="1.3")
 
 # Serve root-level static assets (like logos, Open Graph images, etc.)
-app.mount("/assets", StaticFiles(directory=BASE_DIR), name="assets")
+#app.mount("/assets", StaticFiles(directory=BASE_DIR), name="assets")
+app.mount("/assets", StaticFiles(directory=os.path.join(BASE_DIR, "assets")), name="assets")
 
 app.add_middleware(
     CORSMiddleware,
